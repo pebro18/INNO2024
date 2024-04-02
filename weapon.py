@@ -1,6 +1,6 @@
 import pygame
 from object import Object
-from agents.player import Player
+from player import Player
 
 
 class Weapon(Object):
