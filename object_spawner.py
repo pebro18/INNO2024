@@ -37,7 +37,7 @@ class ObjectSpawner:
                 row_total += cum_sums[i][j]
             cum_row_probs.append(row_total)
 
-        rand_row = random.choices(range(len(cum_row_probs)),weights=cum_row_probs)
+        rand_row = random.choices(range(len(cum_row_probs)), weights=cum_row_probs)
         rand_col = 0
         rand_num = random.uniform(0, 1)
 
@@ -46,12 +46,12 @@ class ObjectSpawner:
                 rand_col = i
                 break
 
-        return rand_row[0],rand_col
+        return rand_row[0], rand_col
     
     def spawn_food(self, grid):
         x, y = self.choose_spawn_cell()
         if not grid[x][y].objects:
-            food = Food(grid[x][y].x, grid[x][y].y, 30 // 2, (0, 255, 0), True)
+            food = Food(grid[x][y].x, grid[x][y].y, 30 // 2, True)
             grid[x][y].objects.append(food)
             return food
 
