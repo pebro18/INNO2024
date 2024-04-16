@@ -1,5 +1,9 @@
+from pygame.image import load
+
 WINDOW_WIDTH = 600
 WINDOW_HEIGHT = 600
 TILE_SIZE = 30
 TILES_WIDE = WINDOW_WIDTH // TILE_SIZE
 TILES_HIGH = WINDOW_HEIGHT // TILE_SIZE
+
+FOOD_IMAGE = load('food.png')

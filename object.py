@@ -9,6 +9,6 @@ class Object:
         self.color = color
         self.visible = visible
 
-    def draw(self, screen: pygame.surface.Surface) -> None:
+    def draw(self, screen: pygame.surface.Surface, image) -> None:
         if self.visible is True:
-            pygame.draw.circle(surface=screen, color=self.color, center=(self.x, self.y), radius=self.size)
+            screen.blit(source=pygame.transform.scale(image, (30, 30)), dest=(self.x - 15, self.y - 15))

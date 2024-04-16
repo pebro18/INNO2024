@@ -12,10 +12,6 @@ class Tile:
     def index(self) -> (int, int):
         return self.x // self.size, self.y // self.size
 
-    def append(self, player) -> None:
-        if player not in self.objects:
-            self.objects.append(player)
-
     def draw(self, screen: pygame.surface.Surface) -> None:
         rect = pygame.Rect(self.x, self.y, self.size, self.size)
         rect.center = (self.x, self.y)

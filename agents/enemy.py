@@ -1,5 +1,6 @@
 import pygame
 import random
+from tile import Tile
 
 
 class Enemy:

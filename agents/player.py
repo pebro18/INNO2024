@@ -2,10 +2,13 @@ import pygame
 import random
 from food import Food
 from agents.enemy import Enemy
+from tile import Tile
+import pandas as pd
+import os
 
 
 class Player:
-    def __init__(self, x, y, radius, color, speed, max_hunger, max_health):
+    def __init__(self, x: int, y: int, radius, color, speed, max_hunger, max_health,auction_manager = None) -> None:
         self.x = x
         self.y = y
         self.radius = radius
@@ -13,18 +16,108 @@ class Player:
         self.speed = speed
         self.hunger = max_hunger
         self.max_hunger = max_hunger
-        self.damage = 2
-        self.weapon = None
         self.max_health = max_health
+
         self.health = max_health
+        self.weapon = None
+        self.damage = 2
+
         self.not_food = {}
         self.map_has_visited = [[]]
         self.memory = {}
         self.direction = None
         self.amount_of_steps = 0
-
         self.hotspot = None
         self.map_enemy_grid_probabilities = []
+
+        self.has_visited = []
+
+        #auction algorithm stuff
+        self.auction_manager_obj = auction_manager
+        self.assignment = None
+        
+        self.food_collected = 0
+        self.survived_ticks = 0
+        self.exported = False
+    
+    def export_stats(self, timestep):
+        df = pd.DataFrame({'Time Survived': [timestep],
+                           'Foods Collected': [self.food_collected],
+                           'Auction Algorithm': [False] if self.auction_manager_obj is None else [True]})
+        print(df)
+        df.to_csv(f"agent_stat_export/run1/agent {len(os.listdir('agent_stat_export/run1/'))}.csv",
+                  index=False)
+        self.exported = True
+        
+    def update_behaviour(self, tiles, timestep):
+        """ Update the behaviour of the agent """	
+        if self.hunger <= 0 or self.health <= 0:  # Als de honger 0 is, dood de agent
+            self.health = 0 # Zet de health op 0
+            if not self.exported:
+                self.export_stats(timestep)
+            return
+        action = self.choose_action(tiles)  # Kies een actie
+        self.perform_action(action, tiles)  # Voer de gekozen actie uit
+
+        self.update_memory(timestep, tiles)  # Update memory
+        self.update_hunger(-1)  # Verander honger met -1
+
+    def choose_action(self, tiles):
+        """ Return Possible Actions: [Random Move, Go To Highest Food Probability]"""
+        if self.hunger > self.max_hunger / 2:  # Beweeg random als de agent boven max_hunger / 2 is
+            return "Random Move"
+        elif self.assignment is not None:
+            return "Go To Assignment Location"  # Als er een assignment is, ga naar de assignment locatie
+        elif self.hunger <= self.max_hunger / 2:  # Ga naar voedsel met hoogste kans op voedsel
+            if self.auction_manager_obj is None:
+                probabilities = self.calculate_food_probabilities(tiles, False)
+                for tile, probability in probabilities.items():
+                    if tile not in self.has_visited:
+                        return "Go To Highest Food Probability"
+            else:
+                team_number = self.auction_manager_obj.get_team_number_from_player(self)
+                if self.auction_manager_obj.start_auction(tiles,team_number) == "Random Move":
+                    return "Random Move"
+                return "Go To Assignment Location"
+            return "Random Move"  # Als er geen tiles zijn, dan random move
+
+    def perform_action(self, action, tiles):
+        if action == "Random Move":
+            self.random_move(tiles, tiles[0][0].size)
+        elif action == "Go To Highest Food Probability":
+            self.go_to_highest_food_probability(tiles)
+        elif action == "Go To Assignment Location":
+            self.go_to_assignment_location(tiles)
+
+    def go_to_assignment_location(self, tiles):
+
+        detected_food = self.detect_food(tiles)
+        if detected_food:  # If the player found food
+            goal = max(detected_food, key=lambda k: detected_food[k])  # Target tile for the agent
+            self.move((goal.x + 15 - (self.x + 15)) // tiles[0][0].size, (goal.y + 15 - (self.y + 15)) // tiles[0][0].size,
+                        tiles)  # Move the player closer to the tile
+
+        if self.assignment.index() == self.index():
+                self.assignment = None
+                self.random_move(tiles, tiles[0][0].size)
+        if self.assignment is not None:
+            self.go_to_tile(self.assignment, tiles)
+
+        
+    def go_to_highest_food_probability(self, tiles):
+        probabilities = self.calculate_food_probabilities(tiles, False)
+
+        detected_food = self.detect_food(tiles)  # Check if the player finds food, else this variable is None
+        if detected_food:  # If the player found food
+            goal = max(detected_food, key=lambda k: detected_food[k])  # Target tile for the agent
+            self.move((goal.x + 15 - (self.x + 15)) // (self.radius * 2), (goal.y + 15 - (self.y + 15)) // (self.radius * 2), tiles)  # Move the player closer to the tile
+        else:
+            for tile, probability in probabilities.items():  # Ga naar tile waar hij nog niet is geweest.
+                if tile.index() == self.index() and tile not in self.has_visited:  # Als de player op een tile zit in de lijst, voeg hem dan aan de lijst
+                    self.has_visited.append(tile)
+                elif tile not in self.has_visited:
+                    self.go_to_tile(tile, tiles)
+                    break
 
     def index(self) -> (int, int):
         """
@@ -33,35 +126,34 @@ class Player:
         """
         return self.x // self.speed, self.y // self.speed
 
-    def add_grids(self, x, y) -> [(int, int)]:
+    def add_grids(self, x: int, y: int, minimum=0, maximum=19) -> [(int, int)]:
         """
-
-        :param x:
-        :param y:
-        :return:
+        Get the indexes of the possible grids
+        :param x: int
+        :param y: int
+        :param minimum: int
+        :param maximum: int
+        :return: List of Tuples (int, int): x and y index of grid
         """
-        min, max = 0, 19
-
         lst = []
-        if min < x < max:
+        if minimum < x < maximum:
             lst += [(x + 1, y), (x - 1, y)]
-        elif x == min:
+        elif x == minimum:
             lst += [(x + 1, y)]
-        elif x == max:
+        elif x == maximum:
             lst += [(x - 1, y)]
-
         return lst
 
-    def get_adjacent_tiles(self, tiles) -> []:
+    def get_adjacent_tiles(self, tiles: [[Tile]]) -> [Tile]:
         """
-        Get the Agent's adjecent tiles
+        Get the Agent's adjacent tiles
         :param tiles: The entire Grid
-        :return: a list with all adjecent tiles
+        :return: A list with all adjacent tiles
         """
         x, y = self.index()  # Current position
-        return [tiles[x][y] for x, y in self.add_grids(x, y) + [coords[::-1] for coords in self.add_grids(y, x)]]
+        return [tiles[x][y] for x, y in self.add_grids(x=x, y=y) + [coords[::-1] for coords in self.add_grids(x=y, y=x)]]
 
-    def move(self, dx, dy, tiles):
+    def move(self, dx: int, dy: int, tiles: [[Tile]]) -> None:
         """
         Set the next x- and y-coordinates for the Agent
         :param dx: Difference in x
@@ -75,42 +167,39 @@ class Player:
         new_x = self.x + dx * self.speed  # Next x-coordinate
         new_y = self.y + dy * self.speed  # Next y-coordinate
         bottom_right_tile = tiles[-1][-1]
-        if (0 < new_x < bottom_right_tile.x + bottom_right_tile.size) and (0 < new_y < bottom_right_tile.y + bottom_right_tile.size):
+        if (0 < new_x < bottom_right_tile.x + bottom_right_tile.size) and (
+                0 < new_y < bottom_right_tile.y + bottom_right_tile.size):
             self.x = new_x  # Set new x-coordinate
             self.y = new_y  # Set new y-coordinate
-        x, y = self.index()
-        tiles[x][y].color = (122, 122, 122)
 
-    def go_to_tile(self, tile, tiles):
+    def go_to_tile(self, tile: Tile, tiles: [[Tile]]) -> None:
         """
         Calculates what the next x- and y-coordinates are
         :param tile: Next tile
         :param tiles: The entire Grid
-        :return:
+        :return: None
         """
         tile_x, tile_y = tile.index()
-        print(f'{self.index()}\t({tile_x}, {tile_y})')
         x, y = self.index()
         new_x = 1 if tile_x - x > 0 else (-1 if tile_x - x < 0 else 0)
         if new_x != 0:  # If the next x-coordinate is not the same:
-            self.move(new_x, 0, tiles)
+            self.move(dx=new_x, dy=0, tiles=tiles)
         else:  # Move Agent on y-axis
             new_y = 1 if tile_y - y > 0 else (-1 if tile_y - y < 0 else 0)
-            self.move(0, new_y, tiles)
+            self.move(dx=0, dy=new_y, tiles=tiles)
 
-    def move_direction(self, tiles):
+    def move_direction(self, tiles: [[Tile]]) -> None:
         """
         Move the agent to a direction
-        :param tiles:
-        :return:
+        :param tiles: The entire Grid
+        :return: None
         """
         self.amount_of_steps -= 1
 
-        # Check if enemy is in adjacent tiles and if so, move away from it
-        # Reactive behaviour
-        enemy_dectected = self.enemy_detected(tiles)
-        if enemy_dectected != None:
-            self.direction = enemy_dectected
+        # Check if enemy is in adjacent tiles and if so, move away from it (reactive behaviour)
+        enemy_detected = self.enemy_detected(tiles)
+        if enemy_detected is not None:
+            self.direction = enemy_detected
 
         if self.direction == "north":
             self.move(0, -1, tiles)
@@ -121,7 +210,7 @@ class Player:
         elif self.direction == "west":
             self.move(-1, 0, tiles)
 
-    def detect_food(self, tiles):
+    def detect_food(self, tiles: [[Tile]]) -> dict:
         """
         See if there is food in adjecent tiles
         :param tiles: The entire Grid
@@ -132,16 +221,14 @@ class Player:
             for object in tile.objects:
                 if isinstance(object, Food):
                     food_dict[tile] = food_dict.get(tile, 0) + 1
-                    # print("Found food!")
-        # print(food_dict)
         return food_dict
 
-    def max_food_probability(self, tiles, update_probability):
+    def calculate_food_probabilities(self, tiles: [[Tile]], update_probability: bool) -> dict:
         """
         Calculate the probability of finding food
         :param tiles: The entire Grid
         :param update_probability: Boolean if the probability has to be updated
-        :return: tile where the highest chance is of finding food
+        :return: Sorted dictionary of food probabilities
         """
         food_tiles = {}
         for timestep in self.memory:
@@ -149,8 +236,8 @@ class Player:
             if Food in objects:
                 food_tiles[tile] = food_tiles.get(tile, 0) + 1
 
-        if update_probability is True:  # If the probability has to be updated:
-            for tile in self.get_adjacent_tiles(tiles):
+        if update_probability:  # If the probability has to be updated:
+            for tile in self.get_adjacent_tiles(tiles=tiles):
                 for timestep in self.memory:
                     tile_memory, objects = self.memory[timestep]
                     if tile == tile_memory and Food not in [type(object) for object in tile.objects]:
@@ -158,35 +245,20 @@ class Player:
 
         for tile in food_tiles:
             food_tiles[tile] /= food_tiles[tile] + self.not_food.get(tile, 0)
-        try:
-            maximum = max(food_tiles, key=lambda x: food_tiles[x])
-        except ValueError:
-            return None
 
-        self.notFoundFood = []
+        return dict(reversed(sorted(food_tiles.items(), key=lambda item: item[1])))
 
-        if self.index() == maximum.index() and Food not in [type(object) for object in maximum.objects]:
-            return None
-        else:
-            return maximum
-
-    def reset_map(self, tiles):
+    def reset_map(self, tiles: [[Tile]]) -> None:
         """
         Reset the map
         :param tiles: The entire Grid
         :return: None
         """
-        new_map = []
-        for tile in tiles:  # For every tile in the grid
-            new = []
-            for num_tile in range(len(tiles)):
-                new.append(0)
-            new_map.append(new)
+        new_map = [[0 for num_tile in range(len(tiles))] for tile in tiles]
         self.map_has_visited = new_map
-        self.map_food_probability = new_map
         self.map_enemy_grid_probabilities = new_map
 
-    def update_memory(self, timestep, tiles):
+    def update_memory(self, timestep: int, tiles: [[Tile]]) -> None:
         """
         Update the Agent's memory
         :param timestep: Current tick
@@ -194,26 +266,29 @@ class Player:
         :return: None
         """
         x, y = self.index()
-        tuple = (tiles[x][y], tiles[x][y].objects)
-        if tuple[1]:
-            lst = []
-            for object in tuple[1]:
-                lst.append(type(object))
-            self.memory[timestep] = (tuple[0], lst)
+        tile, objects = (tiles[x][y], tiles[x][y].objects)
+        if objects:
+            self.memory[timestep] = (tile, [type(object) for object in objects])
 
-    def choose_direction(self, tiles, amount_tiles):
+    def choose_direction(self, tiles: [[Tile]], amount_tiles: int) -> None:
         """
-        Look at all directions and determine how many tiles are not explored yet. Decide based on this which direction to go to.
+        Look at all directions and determine how many tiles are not explored yet.
+        Decide based on this which direction to go to.
         :param tiles: The entire grid
         :param amount_tiles: Amount of tiles the Agent can see ahead of him
         :return: Direction with the most amount of tiles that aren't explored yet
         """
+
+        # if self.assignment == True:
+        #     self.choose_direction_assignment(tiles=tiles)
+        #     return NotImplemented
+
         directions = {"north": 0, "east": 0, "south": 0, "west": 0}
-        latest_direction = None
-        directions = self.enemy_avoidance_based_on_memory(directions, tiles, amount_tiles)
+        directions = self.enemy_avoidance_based_on_memory(directions=directions, tiles=tiles, amount_tiles=amount_tiles)
+
+
         x, y = self.index()
         for i in range(x - 1, max(x - amount_tiles - 1, -1), -1):  # Check west direction
-            # if not tiles[i][y].objects:
             if self.map_has_visited[i][y] == 0:
                 directions["west"] += 1
         for i in range(x + 1, min(x + amount_tiles + 1, len(tiles))):  # Check east direction
@@ -228,7 +303,7 @@ class Player:
 
         return max(directions, key=directions.get)
 
-    def enemy_avoidance_based_on_memory(self, directions, tiles, amount_tiles):
+    def enemy_avoidance_based_on_memory(self, directions: dict, tiles: [[Tile]], amount_tiles: int) -> dict:
         """
         Look at all directions and determine how many times it saw an enemy in that direction.
         :param directions: All directions the Agent can move to
@@ -238,30 +313,24 @@ class Player:
         """
         x, y = self.index()
         rememberance_of_enemies = self.search_enemy_in_memory()
-        enemy_positions = []
-        for enemy in rememberance_of_enemies:
-            indexed_x = enemy.x // (self.radius * 2)
-            indexed_y = enemy.y // (self.radius * 2)
-            enemy_positions.append((indexed_x, indexed_y))
+        enemy_positions = [(enemy.x // (self.radius * 2), enemy.y // (self.radius * 2)) for enemy in
+                           rememberance_of_enemies]
 
         for i in range(x - 1, max(x - amount_tiles - 1, -1), -1):  # Check west direction
             if (i, y) in enemy_positions:
                 directions["west"] -= 1
-
         for i in range(x + 1, min(x + amount_tiles + 1, len(tiles))):  # Check east direction
             if (i, y) in enemy_positions:
                 directions["east"] -= 1
-
         for j in range(y - 1, max(y - amount_tiles - 1, -1), -1):  # Check north direction
             if (x, j) in enemy_positions:
                 directions["north"] -= 1
-
         for j in range(y + 1, min(y + amount_tiles + 1, len(tiles[0]))):  # Check south direction
             if (x, j) in enemy_positions:
                 directions["south"] -= 1
         return directions
 
-    def calculate_enemy_prob_of_entire_grid_based_on_memory(self, tiles):
+    def calculate_enemy_prob_of_entire_grid_based_on_memory(self) -> None:
         """
         Calculate the probability of encountering an enemy based on how many encounters it has had in its memory
         :param tiles: The entire Grid
@@ -278,13 +347,12 @@ class Player:
         for i in range(len(self.map_enemy_grid_probabilities)):
             for j in range(len(self.map_enemy_grid_probabilities[i])):
                 if (i, j) in enemy_positions:
-                    print("enemy detected in grid position: ", i, j, "")
                     self.map_enemy_grid_probabilities[i][j] += 1
                 else:
                     self.map_enemy_grid_probabilities[i][j] = 0
         pass
 
-    def search_enemy_in_memory(self):
+    def search_enemy_in_memory(self) -> [Enemy]:
         """
         Look for enemies that have been encountered in its memory
         :return: List of all enemies that have been enountered
@@ -296,7 +364,7 @@ class Player:
                     list_of_enemies.append(obj)
         return list_of_enemies
 
-    def enemy_detected(self, tiles):
+    def enemy_detected(self, tiles: [[Tile]]) -> None or str:
         """
         Detect where an enemy is
         :param tiles: The entire Grid
@@ -407,3 +475,70 @@ class Player:
     def remember_attack(self, enemy, timestamp):
         # self.memory[timestamp] += enemy
         pass
+
+    def random_move(self, tiles: [[Tile]], TILE_SIZE) -> None:
+        """
+        Move the player to a random tile.
+        :param tiles: The entire Grid
+        :return: None
+        """
+        if self.amount_of_steps == 0:  # If the player is in its starting position
+            self.direction = self.choose_direction(tiles, 3)
+            self.amount_of_steps = 3  # Add amount of taken steps to agent
+        detected_food = self.detect_food(tiles)  # Check if the player finds food, else this variable is None
+        if detected_food:  # If the player found food
+            goal = max(detected_food, key=lambda k: detected_food[k])  # Target tile for the agent
+            self.move((goal.x + 15 - (self.x + 15)) // TILE_SIZE, (goal.y + 15 - (self.y + 15)) // TILE_SIZE,
+                        tiles)  # Move the player closer to the tile
+        else:
+            self.move_direction(tiles)  # Move the player with different logic
+
+    def collision_enemy(self, enemy):
+        """
+        Check for any collisions with enemies
+        :param enemy: Enemy
+        :return: None
+        """
+        distance = ((self.x - enemy.x) ** 2 + (self.y - enemy.y) ** 2) ** 0.5
+        if distance < self.radius + enemy.radius:
+            enemy.health -= self.use_weapon()
+            self.health -= enemy.use_weapon()
+            # player.remember_attack(timestep, enemy)
+            return True
+        return False
+
+    def collision_food(self, food, tiles):
+        """
+        Check for collisions with food object
+        :param food: Food item
+        :param tiles: The entire grid
+        :return: None
+        """
+        distance = ((self.x - food.x) ** 2 + (self.y - food.y) ** 2) ** 0.5
+        if distance < self.radius + food.size:
+            food.collision_detected(self)
+            x, y = self.index()
+            if tiles[x][y].objects.count(food) > 0:
+                tiles[x][y].objects.remove(food)
+            self.has_visited = []
+            self.food_collected += 1
+            return True
+        return False
+
+    def collision_weapon(self, weapon, tiles):
+        """
+        Check for collisions with weapons
+        :param weapon: Weapon object
+        :param tiles: The entire grid
+        :return: None
+        """
+        distance = ((self.x - weapon.x) ** 2 + (self.y - weapon.y) ** 2) ** 0.5
+        if distance < self.radius + weapon.size:
+            weapon.collision_detected(self)
+            x, y = self.index()
+            tiles[x][y].objects.remove(weapon)
+            return True
+        return False
+    
+    def recieve_assignment(self, assignment):
+        self.assignment = assignment

@@ -1,17 +1,22 @@
 import random
 from food import Food
 
+
 class ObjectSpawner:
     """This class is responsible for spawning food and weapons in the game"""
 
-    def __init__(self,x,y):
+    def __init__(self, row_lenght, column_lenght):
 
-        self.grid = [[0.1 for x in range(x)] for y in range(y)]
+        self.total_amount_of_cells = row_lenght * column_lenght
+        self.cell_probability = 1 / self.total_amount_of_cells
+        self.grid = [
+            [self.cell_probability for x in range(row_lenght)] for y in range(column_lenght)]
+
         self.food_list = []
         self.weapons_list = []
 
-    def set_specific_chance_in_grid(self, x, y, chance):
-        self.grid[x][y] = chance
+    def set_specific_chance_in_grid(self, grid_x, grid_y, chance):
+        self.grid[grid_x][grid_y] = chance
 
     def choose_spawn_cell(self):
         cum_sums = []
@@ -29,30 +34,42 @@ class ObjectSpawner:
             prob_row = [val / max_val for val in row]
             cum_probs.append(prob_row)
 
-
         cum_row_probs = []
-        for i in range(len(cum_sums)):
+        for interator in range(len(cum_sums)):
+
             row_total = 0
-            for j in range(len(cum_sums[i])):
-                row_total += cum_sums[i][j]
+
+            for j in range(len(cum_sums[interator])):
+                row_total += cum_sums[interator][j]
             cum_row_probs.append(row_total)
 
-        rand_row = random.choices(range(len(cum_row_probs)),weights=cum_row_probs)
+        rand_row = random.choices(
+            range(len(cum_row_probs)), weights=cum_row_probs)
         rand_col = 0
         rand_num = random.uniform(0, 1)
 
-        for i, cum_prob in enumerate(cum_probs[rand_row[0]]):
+        for interator, cum_prob in enumerate(cum_probs[rand_row[0]]):
             if rand_num < cum_prob:
-                rand_col = i
+                rand_col = interator
                 break
 
-        return rand_row[0],rand_col
-    
+        return rand_row[0], rand_col
+
+    def choose_all_spawn_cells_based_on_given_probability(self, probability: float):
+        list_of_cells = []
+        for row in range(len(self.grid)):
+            for column in range(len(self.grid[row])):
+                rand_num = random.uniform(0, 1)
+                if rand_num < probability:
+                    list_of_cells.append(self.grid[row][column])
+        return list_of_cells
+
     def spawn_food(self, grid):
-        x, y = self.choose_spawn_cell()
-        if not grid[x][y].objects:
-            food = Food(grid[x][y].x, grid[x][y].y, 30 // 2, (0, 255, 0), True)
-            grid[x][y].objects.append(food)
+        grid_x, grid_y = self.choose_spawn_cell()
+        if not grid[grid_x][grid_y].objects:
+            food = Food(grid[grid_x][grid_y].x, grid[grid_x]
+                        [grid_y].y, 30 // 2, (0, 255, 0), True)
+            grid[grid_x][grid_y].objects.append(food)
             return food
 
     def get_specific_food(self, name):
@@ -60,4 +77,3 @@ class ObjectSpawner:
 
     def get_specific_weapon(self, name):
         return self.weapons_list[name]
-
